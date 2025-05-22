@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flight Simulator</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            font-family: Arial, sans-serif;
+        }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <p>Plane: A330neo</p>
+        <p>Speed: <span id="speed">0</span> km/h</p>
+        <p>Altitude: <span id="altitude">0</span> m</p>
+        <p>Distance to LPPT: <span id="distance">0</span> km</p>
+        <p>Controls: Arrows for pitch/roll, W/S for throttle</p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Ground
+        const groundGeometry = new THREE.PlaneGeometry(5000, 5000);
+        const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x00FF00 });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // Airplane model
+        const plane = new THREE.Group();
+        const fuselage = new THREE.Mesh(
+            new THREE.BoxGeometry(10, 1, 1),
+            new THREE.MeshBasicMaterial({ color: 0xAAAAAA })
+        );
+        fuselage.position.z = -2.5;
+        plane.add(fuselage);
+        const wings = new THREE.Mesh(
+            new THREE.BoxGeometry(20, 0.1, 2),
+            new THREE.MeshBasicMaterial({ color: 0xAAAAAA })
+        );
+        wings.position.y = -0.5;
+        plane.add(wings);
+        const tailVert = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 2, 0.1),
+            new THREE.MeshBasicMaterial({ color: 0xAAAAAA })
+        );
+        tailVert.position.set(0, 1, -5);
+        plane.add(tailVert);
+        const tailHoriz = new THREE.Mesh(
+            new THREE.BoxGeometry(5, 0.1, 1),
+            new THREE.MeshBasicMaterial({ color: 0xAAAAAA })
+        );
+        tailHoriz.position.set(0, 1, -5);
+        plane.add(tailHoriz);
+        const engine1 = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.3, 0.3, 1, 32),
+            new THREE.MeshBasicMaterial({ color: 0x555555 })
+        );
+        engine1.position.set(4, -0.8, -1);
+        engine1.rotation.z = Math.PI / 2;
+        plane.add(engine1);
+        const engine2 = engine1.clone();
+        engine2.position.x = -4;
+        plane.add(engine2);
+        plane.position.set(0, 10, 0);
+        scene.add(plane);
+
+        // Airports (LHR and LPPT)
+        const runwayMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
+        const buildingMaterial = new THREE.MeshBasicMaterial({ color: 0x888888 });
+
+        // LHR
+        const lhrRunway = new THREE.Mesh(new THREE.BoxGeometry(50, 0.1, 300), runwayMaterial);
+        lhrRunway.position.set(0, 0.05, 0);
+        scene.add(lhrRunway);
+        const lhrTerminal = new THREE.Mesh(new THREE.BoxGeometry(20, 5, 20), buildingMaterial);
+        lhrTerminal.position.set(-50, 2.5, 0);
+        scene.add(lhrTerminal);
+        const lhrTower = new THREE.Mesh(new THREE.BoxGeometry(5, 10, 5), buildingMaterial);
+        lhrTower.position.set(-60, 5, 10);
+        scene.add(lhrTower);
+
+        //。\LPPT
+        const lpptRunway = new THREE.Mesh(new THREE.BoxGeometry(50, 0.1, 300), runwayMaterial);
+        lpptRunway.position.set(1000, 0.05, 1000);
+        scene.add(lpptRunway);
+        const lpptTerminal = new THREE.Mesh(new THREE.BoxGeometry(20, 5, 20), buildingMaterial);
+        lpptTerminal.position.set(950, 2.5, 1000);
+        scene.add(lpptTerminal);
+        const lpptTower = new THREE.Mesh(new THREE.BoxGeometry(5, 10, 5), buildingMaterial);
+        lpptTower.position.set(940, 5, 1010);
+        scene.add(lpptTower);
+        const lpptMarker = new THREE.Mesh(
+            new THREE.BoxGeometry(5, 5, 5),
+            new THREE.MeshBasicMaterial({ color: 0xFF0000 })
+        );
+        lpptMarker.position.set(1000, 2.5, 1000);
+        scene.add(lpptMarker);
+
+        // Flight variables
+        let speed = 0;
+        let pitch = 0;
+        let roll = 0;
+        let verticalSpeed = 0;
+        const stallSpeed = 0.2;
+
+        // Camera setup with fixed position
+        const cameraOffset = new THREE.Vector3(0, 5, 20);
+        camera.position.copy(plane.position).add(cameraOffset);
+        camera.lookAt(plane.position);
+
+        // Controls
+        const keys = {};
+        document.addEventListener('keydown', (e) => keys[e.key] = true);
+        document.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update controls
+            if (keys['ArrowUp']) pitch = Math.min(pitch + 0.01, Math.PI / 4);
+            if (keys['ArrowDown']) pitch = Math.max(pitch - 0.01, -Math.PI / 4);
+            if (keys['ArrowLeft']) roll = Math.min(roll + 0.01, Math.PI / 4);
+            if (keys['ArrowRight']) roll = Math.max(roll - 0.01, -Math.PI / 4);
+            if (keys['w']) speed = Math.min(speed + 0.005, 0.5);
+            if (keys['s']) speed = Math.max(speed - 0.005, 0);
+
+            // Apply pitch and roll
+            plane.rotation.x = pitch;
+            plane.rotation.z = -roll;
+
+            // Flight dynamics
+            if (speed > stallSpeed) {
+                verticalSpeed = speed * Math.sin(pitch);
+            } else {
+                verticalSpeed = -0.1;
+            }
+            plane.position.y += verticalSpeed;
+            if (plane.position.y < 0) plane.position.y = 0;
+            plane.translateZ(-speed);
+            const turnRate = 0.001 * roll * speed;
+            plane.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), turnRate);
+
+            // Update camera to follow the plane
+            camera.position.copy(plane.position).add(cameraOffset);
+            camera.lookAt(plane.position);
+
+            // Update HUD
+            const speedDisplay = speed * 1000;
+            const altitudeDisplay = plane.position.y * 100;
+            const dx = 1000 - plane.position.x;
+            const dz = 1000 - plane.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz) / 1000; // In "km"
+            document.getElementById('speed').innerText = speedDisplay.toFixed(0);
+            document.getElementById('altitude').innerText = altitudeDisplay.toFixed(0);
+            document.getElementById('distance').innerText = distance.toFixed(2);
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
